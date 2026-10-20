@@ -5,7 +5,10 @@ import pg from 'pg'
 
 const { Pool } = pg
 const app = express()
-const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('supabase.co') ? { rejectUnauthorized: false } : undefined,
+})
 const port = Number(process.env.PORT || 3001)
 
 app.use(cors())
