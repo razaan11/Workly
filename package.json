@@ -5,13 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "server": "node server/index.js",
-    "dev:full": "concurrently \"npm run server\" \"npm run dev\"",
-    "db:setup": "node scripts/setup-database.js",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "@vitejs/plugin-react": "latest",
     "concurrently": "^10.0.6",
     "cors": "^2.8.6",
