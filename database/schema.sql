@@ -166,6 +166,19 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_admins ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "admins manage employees" ON employees;
+DROP POLICY IF EXISTS "admins manage projects" ON projects;
+DROP POLICY IF EXISTS "admins manage tasks" ON tasks;
+DROP POLICY IF EXISTS "admins manage leave" ON leave_requests;
+DROP POLICY IF EXISTS "admins manage events" ON calendar_events;
+DROP POLICY IF EXISTS "admins manage attendance" ON attendance_records;
+DROP POLICY IF EXISTS "admins manage rewards" ON rewards;
+DROP POLICY IF EXISTS "admins manage documents" ON employee_documents;
+DROP POLICY IF EXISTS "admins manage balances" ON leave_balances;
+DROP POLICY IF EXISTS "admins manage invitations" ON admin_invitations;
+DROP POLICY IF EXISTS "admins read audit logs" ON audit_logs;
+DROP POLICY IF EXISTS "admins read notifications" ON notifications;
+
 CREATE POLICY "admins manage employees" ON employees FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage projects" ON projects FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage tasks" ON tasks FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
