@@ -8,7 +8,18 @@ const emptyDashboard = { summary: { total_employees: 0, on_leave: 0, active_proj
 
 async function api(action, payload = {}) {
   const { data, error } = await requireClient().functions.invoke('workly-api', { body: { action, ...payload } })
-  if (error) throw error
+  if (error) {
+    let message = error.message
+    if (typeof error.context?.json === 'function') {
+      try {
+        const responseBody = await error.context.json()
+        message = responseBody?.error || message
+      } catch {
+        // Keep the Supabase client error when the response has no JSON body.
+      }
+    }
+    throw new Error(message)
+  }
   if (data?.error) throw new Error(data.error)
   return data
 }
