@@ -1,0 +1,5 @@
+-- Run this after creating the first administrator in Supabase Auth.
+-- Replace the placeholder with that administrator's email address.
+INSERT INTO public.app_admins (user_id, email)
+SELECT id, email FROM auth.users WHERE email = 'REPLACE_WITH_ADMIN_EMAIL'
+ON CONFLICT (user_id) DO NOTHING;

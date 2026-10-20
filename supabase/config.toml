@@ -1,0 +1,2 @@
+[functions.workly-api]
+verify_jwt = true
