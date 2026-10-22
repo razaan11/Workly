@@ -46,9 +46,11 @@ export default {
         ctx.supabaseAdmin.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
         ctx.supabaseAdmin.from('employee_invitations').select('*').order('created_at', { ascending: false }),
       ])
-      const failed = [employees, projects, events, tasks, leaveRequests, attendance, rewards, documents, corrections, auditLogs, notifications, invitations].find((result) => result.error)
+      // Core workspace data must succeed. Optional modules should not make the
+      // whole admin dashboard unavailable while a migration is being applied.
+      const failed = [employees, projects, events, tasks, leaveRequests, attendance, rewards].find((result) => result.error)
       if (failed?.error) return json({ error: failed.error.message }, 400)
-      return json({ employees: employees.data, projects: projects.data, events: events.data, tasks: tasks.data, leaveRequests: leaveRequests.data, attendance: attendance.data, rewards: rewards.data, documents: documents.data, corrections: corrections.data, auditLogs: auditLogs.data, notifications: notifications.data, invitations: invitations.data })
+      return json({ employees: employees.data, projects: projects.data, events: events.data, tasks: tasks.data, leaveRequests: leaveRequests.data, attendance: attendance.data, rewards: rewards.data, documents: documents.error ? [] : documents.data, corrections: corrections.error ? [] : corrections.data, auditLogs: auditLogs.error ? [] : auditLogs.data, notifications: notifications.error ? [] : notifications.data, invitations: invitations.error ? [] : invitations.data })
     }
 
     if (action === 'create' || action === 'update') {
