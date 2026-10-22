@@ -7,7 +7,7 @@ const tableFields: Record<string, string[]> = {
   tasks: ['project_id', 'assignee_id', 'assigned_by', 'title', 'description', 'status', 'start_date', 'due_date', 'priority', 'milestone_id', 'dependency_note', 'blocker_note', 'deliverable_url'],
   leave_requests: ['employee_id', 'leave_type', 'start_date', 'end_date', 'status', 'reason', 'day_portion', 'supporting_document_path', 'handover_information', 'emergency_contact', 'chargeable_days', 'decision_reason', 'policy_exception'],
   attendance_records: ['employee_id', 'attendance_date', 'check_in', 'check_out', 'work_mode', 'attendance_status', 'correction_reason'],
-  rewards: ['employee_id', 'reason', 'status', 'nominated_at'],
+  rewards: ['employee_id', 'reason', 'status', 'nominated_at', 'decision_reason'],
   calendar_events: ['project_id', 'title', 'description', 'event_type', 'starts_at', 'ends_at'],
   employee_documents: ['employee_id', 'document_name', 'document_type', 'storage_path', 'expiry_date'],
   leave_balances: ['employee_id', 'leave_type', 'balance_days'],
@@ -53,6 +53,10 @@ export default {
       const { table, values, id } = body
       if (!tableFields[table] || !values || (action === 'update' && !id)) return json({ error: 'Invalid record request.' }, 400)
       const record = safeRecord(table, values)
+      if (table === 'rewards' && action === 'update' && ['approved', 'rejected'].includes(String(values.status))) {
+        record.decided_by = user.id
+        record.decided_at = new Date().toISOString()
+      }
       const previous = action === 'update' ? await ctx.supabaseAdmin.from(table).select('*').eq('id', id).maybeSingle() : { data: null, error: null }
       if (previous.error || (action === 'update' && !previous.data)) return json({ error: 'The record was not found.' }, 404)
       const query = action === 'create'
