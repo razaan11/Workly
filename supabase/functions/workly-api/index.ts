@@ -6,7 +6,7 @@ const tableFields: Record<string, string[]> = {
   projects: ['project_code', 'name', 'description', 'manager_id', 'team_lead_id', 'status', 'risk_level', 'start_date', 'due_date', 'progress', 'cancelled_at'],
   tasks: ['project_id', 'assignee_id', 'assigned_by', 'title', 'description', 'status', 'start_date', 'due_date', 'priority', 'milestone_id', 'dependency_note', 'blocker_note', 'deliverable_url'],
   leave_requests: ['employee_id', 'leave_type', 'start_date', 'end_date', 'status', 'reason', 'day_portion', 'supporting_document_path', 'handover_information', 'emergency_contact', 'chargeable_days', 'decision_reason', 'policy_exception'],
-  attendance_records: ['employee_id', 'attendance_date', 'check_in', 'check_out', 'work_mode', 'attendance_status', 'correction_reason'],
+  attendance_records: ['employee_id', 'attendance_date', 'check_in', 'check_out', 'work_mode', 'attendance_status', 'correction_reason', 'shift_name', 'break_minutes', 'overtime_minutes', 'total_work_minutes'],
   rewards: ['employee_id', 'reason', 'status', 'nominated_at', 'decision_reason'],
   calendar_events: ['project_id', 'title', 'description', 'event_type', 'starts_at', 'ends_at'],
   employee_documents: ['employee_id', 'document_name', 'document_type', 'storage_path', 'expiry_date'],
@@ -17,6 +17,7 @@ const tableFields: Record<string, string[]> = {
   project_milestones: ['project_id', 'title', 'due_date', 'status'],
   task_comments: ['task_id', 'body'],
   notification_preferences: ['event_name', 'delivery_channel', 'enabled', 'recipient_rule'],
+  employee_documents: ['employee_id', 'document_name', 'document_type', 'storage_path', 'expiry_date', 'access_level'],
 }
 
 const safeRecord = (table: string, values: Record<string, unknown>) => Object.fromEntries(
@@ -34,7 +35,7 @@ export default {
     const action = body?.action
 
     if (action === 'dashboard') {
-      const [employees, projects, events, tasks, leaveRequests, attendance, rewards, documents, corrections, auditLogs, notifications] = await Promise.all([
+      const [employees, projects, events, tasks, leaveRequests, attendance, rewards, documents, corrections, auditLogs, notifications, invitations] = await Promise.all([
         ctx.supabaseAdmin.from('employees').select('*'), ctx.supabaseAdmin.from('projects').select('*'),
         ctx.supabaseAdmin.from('calendar_events').select('*').order('starts_at'), ctx.supabaseAdmin.from('tasks').select('*'),
         ctx.supabaseAdmin.from('leave_requests').select('*').order('created_at'), ctx.supabaseAdmin.from('attendance_records').select('*').order('attendance_date', { ascending: false }),
@@ -43,10 +44,11 @@ export default {
         ctx.supabaseAdmin.from('attendance_corrections').select('*').order('created_at', { ascending: false }),
         ctx.supabaseAdmin.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50),
         ctx.supabaseAdmin.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
+        ctx.supabaseAdmin.from('employee_invitations').select('*').order('created_at', { ascending: false }),
       ])
-      const failed = [employees, projects, events, tasks, leaveRequests, attendance, rewards, documents, corrections, auditLogs, notifications].find((result) => result.error)
+      const failed = [employees, projects, events, tasks, leaveRequests, attendance, rewards, documents, corrections, auditLogs, notifications, invitations].find((result) => result.error)
       if (failed?.error) return json({ error: failed.error.message }, 400)
-      return json({ employees: employees.data, projects: projects.data, events: events.data, tasks: tasks.data, leaveRequests: leaveRequests.data, attendance: attendance.data, rewards: rewards.data, documents: documents.data, corrections: corrections.data, auditLogs: auditLogs.data, notifications: notifications.data })
+      return json({ employees: employees.data, projects: projects.data, events: events.data, tasks: tasks.data, leaveRequests: leaveRequests.data, attendance: attendance.data, rewards: rewards.data, documents: documents.data, corrections: corrections.data, auditLogs: auditLogs.data, notifications: notifications.data, invitations: invitations.data })
     }
 
     if (action === 'create' || action === 'update') {
@@ -120,6 +122,17 @@ export default {
       if (error) return json({ error: error.message }, 400)
       await ctx.supabaseAdmin.from('admin_invitations').upsert({ email, invited_by: user.id })
       await ctx.supabaseAdmin.from('audit_logs').insert({ actor_id: user.id, action: 'invite', module: 'admin_invitations', new_value: { email } })
+      return json({ data }, 201)
+    }
+    if (action === 'invite_employee') {
+      const employeeId = String(body?.employeeId || '')
+      const { data: employee, error: employeeError } = await ctx.supabaseAdmin.from('employees').select('id,email,full_name').eq('id', employeeId).single()
+      if (employeeError || !employee?.email) return json({ error: 'A valid employee with an email address is required.' }, 400)
+      const { data, error } = await ctx.supabaseAdmin.auth.admin.inviteUserByEmail(employee.email, { redirectTo: body?.redirectTo })
+      if (error) return json({ error: error.message }, 400)
+      await ctx.supabaseAdmin.from('employee_invitations').insert({ employee_id: employee.id, email: employee.email, invited_by: user.id })
+      await ctx.supabaseAdmin.from('employees').update({ account_status: 'invited' }).eq('id', employee.id)
+      await ctx.supabaseAdmin.from('audit_logs').insert({ actor_id: user.id, action: 'invite_employee', module: 'employees', record_id: employee.id, new_value: { email: employee.email } })
       return json({ data }, 201)
     }
     return json({ error: 'Unknown action.' }, 400)

@@ -268,10 +268,26 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
   UNIQUE (event_name, delivery_channel, recipient_rule)
 );
 
+CREATE TABLE IF NOT EXISTS employee_invitations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
+  email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent', 'revoked', 'accepted', 'expired')),
+  invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+  accepted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS shift_name TEXT;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS break_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS overtime_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS total_work_minutes INTEGER;
+
 CREATE INDEX IF NOT EXISTS employee_documents_expiry_idx ON employee_documents(expiry_date);
 CREATE INDEX IF NOT EXISTS task_reassignments_task_idx ON task_reassignments(task_id);
 CREATE INDEX IF NOT EXISTS attendance_corrections_status_idx ON attendance_corrections(status);
 CREATE INDEX IF NOT EXISTS audit_logs_module_created_idx ON audit_logs(module, created_at DESC);
+CREATE INDEX IF NOT EXISTS employee_invitations_employee_idx ON employee_invitations(employee_id, created_at DESC);
 
 -- Atomic leave decision: approval history and the balance update commit together.
 CREATE OR REPLACE FUNCTION public.decide_leave_request(
@@ -331,6 +347,7 @@ ALTER TABLE task_comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_decisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_corrections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_invitations ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "admins manage employees" ON employees;
 DROP POLICY IF EXISTS "admins manage projects" ON projects;
@@ -353,6 +370,7 @@ DROP POLICY IF EXISTS "admins manage task comments" ON task_comments;
 DROP POLICY IF EXISTS "admins manage leave decisions" ON leave_decisions;
 DROP POLICY IF EXISTS "admins manage attendance corrections" ON attendance_corrections;
 DROP POLICY IF EXISTS "admins manage notification preferences" ON notification_preferences;
+DROP POLICY IF EXISTS "admins manage employee invitations" ON employee_invitations;
 
 CREATE POLICY "admins manage employees" ON employees FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage projects" ON projects FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
@@ -375,3 +393,4 @@ CREATE POLICY "admins manage task comments" ON task_comments FOR ALL TO authenti
 CREATE POLICY "admins manage leave decisions" ON leave_decisions FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage attendance corrections" ON attendance_corrections FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage notification preferences" ON notification_preferences FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage employee invitations" ON employee_invitations FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
