@@ -4,7 +4,7 @@ const requireClient = () => {
   if (!supabase) throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to .env.')
   return supabase
 }
-const emptyDashboard = { summary: { total_employees: 0, on_leave: 0, active_projects: 0, pending_leave_requests: 0 }, employees: [], events: [], projects: [], tasks: [], leaveRequests: [], attendance: [], rewards: [], taskSummary: [] }
+const emptyDashboard = { summary: { total_employees: 0, on_leave: 0, active_projects: 0, pending_leave_requests: 0 }, employees: [], events: [], projects: [], tasks: [], leaveRequests: [], attendance: [], rewards: [], documents: [], corrections: [], auditLogs: [], notifications: [], taskSummary: [] }
 
 async function api(action, payload = {}) {
   const { data, error } = await requireClient().functions.invoke('workly-api', { body: { action, ...payload } })
@@ -35,10 +35,12 @@ export async function getDashboard() {
   const attendance = data.attendance.map((record) => ({ ...record, full_name: employeeById.get(record.employee_id)?.full_name || 'Unknown employee' }))
   const rewards = data.rewards.map((reward) => ({ ...reward, full_name: employeeById.get(reward.employee_id)?.full_name || 'Unknown employee' }))
   const taskSummary = ['pending', 'in_progress', 'in_review', 'completed'].map((status) => ({ status, count: tasks.filter((task) => task.status === status).length }))
-  return { summary: { total_employees: data.employees.filter((employee) => employee.status === 'active').length, on_leave: data.employees.filter((employee) => employee.status === 'on_leave').length, active_projects: projects.filter((project) => ['upcoming', 'in_progress'].includes(project.status)).length, pending_leave_requests: leaveRequests.filter((request) => request.status === 'pending').length }, employees: data.employees, events, projects, tasks, leaveRequests, attendance, rewards, taskSummary }
+  return { summary: { total_employees: data.employees.filter((employee) => employee.status === 'active').length, on_leave: data.employees.filter((employee) => employee.status === 'on_leave').length, active_projects: projects.filter((project) => ['upcoming', 'in_progress'].includes(project.status)).length, pending_leave_requests: leaveRequests.filter((request) => request.status === 'pending').length }, employees: data.employees, events, projects, tasks, leaveRequests, attendance, rewards, documents: data.documents || [], corrections: data.corrections || [], auditLogs: data.auditLogs || [], notifications: data.notifications || [], taskSummary }
 }
 
 export const createEvent = (values) => api('create', { table: 'calendar_events', values: { project_id: values.projectId, title: values.title, description: values.description, event_type: values.eventType, starts_at: new Date(values.startsAt).toISOString() } })
 export const saveRecord = (table, values, id) => api(id ? 'update' : 'create', { table, values, id })
+export const decideLeave = (requestId, decision, chargeableDays, reason) => api('decide_leave', { requestId, decision, chargeableDays, reason })
+export const decideAttendanceCorrection = (correctionId, decision, reason) => api('decide_attendance_correction', { correctionId, decision, reason })
 export const inviteAdmin = (email, redirectTo) => api('invite', { email, redirectTo })
 export { emptyDashboard }

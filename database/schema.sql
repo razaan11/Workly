@@ -148,6 +148,163 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Baseline HR detail.  Every statement is additive so existing cloud records remain intact.
+CREATE TABLE IF NOT EXISTS departments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS designations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_path TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS emergency_contact JSONB;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS employment_type TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS probation_end DATE;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS notice_period_days INTEGER;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS reporting_manager_id UUID REFERENCES employees(id) ON DELETE SET NULL;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS qualifications TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS skills TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS experience_summary TEXT;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS assigned_assets JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'not_invited';
+
+ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS uploaded_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS replaced_by UUID REFERENCES employee_documents(id) ON DELETE SET NULL;
+ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'admin';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS team_lead_id UUID REFERENCES employees(id) ON DELETE SET NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS project_members (
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE RESTRICT,
+  role_name TEXT,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (project_id, employee_id)
+);
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL,
+  due_date DATE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_by UUID REFERENCES employees(id) ON DELETE SET NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS start_date DATE;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS milestone_id UUID REFERENCES project_milestones(id) ON DELETE SET NULL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS dependency_note TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS blocker_note TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deliverable_url TEXT;
+CREATE TABLE IF NOT EXISTS task_reassignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+  previous_assignee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+  new_assignee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+  reason TEXT NOT NULL,
+  changed_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS task_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+  author_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS day_portion TEXT NOT NULL DEFAULT 'full_day';
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS supporting_document_path TEXT;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS handover_information TEXT;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS emergency_contact JSONB;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS chargeable_days NUMERIC(6,2);
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS decision_reason TEXT;
+ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS policy_exception BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE TABLE IF NOT EXISTS leave_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  leave_request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE RESTRICT,
+  decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+  chargeable_days NUMERIC(6,2),
+  reason TEXT,
+  decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS attendance_corrections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  attendance_record_id UUID NOT NULL REFERENCES attendance_records(id) ON DELETE RESTRICT,
+  requested_check_in TIMESTAMPTZ,
+  requested_check_out TIMESTAMPTZ,
+  reason TEXT NOT NULL,
+  status leave_status NOT NULL DEFAULT 'pending',
+  decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  decided_at TIMESTAMPTZ,
+  decision_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS nominated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS decision_reason TEXT;
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_name TEXT NOT NULL,
+  delivery_channel TEXT NOT NULL CHECK (delivery_channel IN ('in_app', 'email')),
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  recipient_rule TEXT NOT NULL,
+  UNIQUE (event_name, delivery_channel, recipient_rule)
+);
+
+CREATE INDEX IF NOT EXISTS employee_documents_expiry_idx ON employee_documents(expiry_date);
+CREATE INDEX IF NOT EXISTS task_reassignments_task_idx ON task_reassignments(task_id);
+CREATE INDEX IF NOT EXISTS attendance_corrections_status_idx ON attendance_corrections(status);
+CREATE INDEX IF NOT EXISTS audit_logs_module_created_idx ON audit_logs(module, created_at DESC);
+
+-- Atomic leave decision: approval history and the balance update commit together.
+CREATE OR REPLACE FUNCTION public.decide_leave_request(
+  p_request_id UUID,
+  p_decision leave_status,
+  p_chargeable_days NUMERIC,
+  p_reason TEXT,
+  p_actor_id UUID
+) RETURNS leave_requests
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE request_row leave_requests;
+BEGIN
+  IF p_decision NOT IN ('approved', 'rejected') THEN RAISE EXCEPTION 'Decision must be approved or rejected'; END IF;
+  SELECT * INTO request_row FROM leave_requests WHERE id = p_request_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Leave request not found'; END IF;
+  IF request_row.status <> 'pending' THEN RAISE EXCEPTION 'Only pending leave requests can be decided'; END IF;
+  IF p_chargeable_days IS NULL OR p_chargeable_days < 0 THEN RAISE EXCEPTION 'Chargeable leave days must be zero or more'; END IF;
+  IF p_decision = 'approved' THEN
+    INSERT INTO leave_balances (employee_id, leave_type, balance_days)
+    VALUES (request_row.employee_id, request_row.leave_type, -p_chargeable_days)
+    ON CONFLICT (employee_id, leave_type)
+    DO UPDATE SET balance_days = leave_balances.balance_days - p_chargeable_days;
+  END IF;
+  UPDATE leave_requests SET status = p_decision, chargeable_days = p_chargeable_days,
+    decision_reason = p_reason, decided_by = p_actor_id, decided_at = NOW()
+  WHERE id = p_request_id RETURNING * INTO request_row;
+  INSERT INTO leave_decisions (leave_request_id, decision, chargeable_days, reason, decided_by)
+  VALUES (p_request_id, p_decision, p_chargeable_days, p_reason, p_actor_id);
+  RETURN request_row;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.is_workly_admin()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
 AS $$ SELECT EXISTS (SELECT 1 FROM public.app_admins WHERE user_id = auth.uid()) $$;
@@ -165,6 +322,15 @@ ALTER TABLE admin_invitations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE designations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_milestones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_reassignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_corrections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "admins manage employees" ON employees;
 DROP POLICY IF EXISTS "admins manage projects" ON projects;
@@ -178,6 +344,15 @@ DROP POLICY IF EXISTS "admins manage balances" ON leave_balances;
 DROP POLICY IF EXISTS "admins manage invitations" ON admin_invitations;
 DROP POLICY IF EXISTS "admins read audit logs" ON audit_logs;
 DROP POLICY IF EXISTS "admins read notifications" ON notifications;
+DROP POLICY IF EXISTS "admins manage departments" ON departments;
+DROP POLICY IF EXISTS "admins manage designations" ON designations;
+DROP POLICY IF EXISTS "admins manage project members" ON project_members;
+DROP POLICY IF EXISTS "admins manage milestones" ON project_milestones;
+DROP POLICY IF EXISTS "admins manage task reassignments" ON task_reassignments;
+DROP POLICY IF EXISTS "admins manage task comments" ON task_comments;
+DROP POLICY IF EXISTS "admins manage leave decisions" ON leave_decisions;
+DROP POLICY IF EXISTS "admins manage attendance corrections" ON attendance_corrections;
+DROP POLICY IF EXISTS "admins manage notification preferences" ON notification_preferences;
 
 CREATE POLICY "admins manage employees" ON employees FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins manage projects" ON projects FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
@@ -191,3 +366,12 @@ CREATE POLICY "admins manage balances" ON leave_balances FOR ALL TO authenticate
 CREATE POLICY "admins manage invitations" ON admin_invitations FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
 CREATE POLICY "admins read audit logs" ON audit_logs FOR SELECT TO authenticated USING (public.is_workly_admin());
 CREATE POLICY "admins read notifications" ON notifications FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage departments" ON departments FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage designations" ON designations FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage project members" ON project_members FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage milestones" ON project_milestones FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage task reassignments" ON task_reassignments FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage task comments" ON task_comments FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage leave decisions" ON leave_decisions FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage attendance corrections" ON attendance_corrections FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
+CREATE POLICY "admins manage notification preferences" ON notification_preferences FOR ALL TO authenticated USING (public.is_workly_admin()) WITH CHECK (public.is_workly_admin());
